@@ -8,7 +8,7 @@
 [![n8n](https://img.shields.io/badge/n8n-1.118.1-EA4B71)](https://n8n.io/)
 [![IA](https://img.shields.io/badge/IA-Groq%20Llama%203.3-F55036)](https://groq.com/)
 [![Self--hosted](https://img.shields.io/badge/Self--hosted-100%25-2E7D32)]()
-[![Licencia](https://img.shields.io/badge/Licencia-MIT-yellow)](./LICENSE)
+[![Licencia](https://img.shields.io/badge/Licencia-Apache%202.0-yellow)](./LICENSE)
 
 </div>
 
