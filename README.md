@@ -126,4 +126,4 @@ Desarrollado para el **Reto 1** de la **Hackathon Cátedra atmira OpenAI & Big D
 
 ## 📄 Licencia
 
-Este proyecto se distribuye bajo licencia [MIT](./LICENSE).
+Este proyecto se distribuye bajo licencia [Apache 2.0](./LICENSE).
