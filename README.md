@@ -120,7 +120,7 @@ El plan gratuito de Groq da para unas **10-20 especificaciones al día** (límit
 | Autor | LinkedIn |
 |---|---|
 | **Francisco Joaquín Jiménez Cordero** | [Perfil](https://www.linkedin.com/in/francisco-joaquín-jiménez-cordero-931029417/) |
-| **Álvaro Villalba Aranda** | [Perfil](https://www.linkedin.com/in/TU-USUARIO-2/) |
+| **Álvaro Villalba Aranda** | [Perfil]([https://www.linkedin.com/in/TU-USUARIO-2/](https://www.linkedin.com/in/alvaro-villalba-aranda-b12314417/)) |
 
 Desarrollado para el **Reto 1** de la **Hackathon Cátedra atmira OpenAI & Big Data**.
 
