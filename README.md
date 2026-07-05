@@ -124,6 +124,10 @@ El plan gratuito de Groq da para unas **10-20 especificaciones al día** (límit
 
 Desarrollado para el **Reto 1** de la **Hackathon Cátedra atmira OpenAI & Big Data**.
 
+## 🤖 Transparencia sobre el desarrollo
+
+Durante el desarrollo de este proyecto se utilizaron herramientas de inteligencia artificial como apoyo para la generación de código, documentación y refactorización. Todo el contenido publicado ha sido revisado, validado y adaptado por los autores, quienes asumen la responsabilidad del resultado final.
+
 ## 📄 Licencia
 
 Este proyecto se distribuye bajo licencia [Apache 2.0](./LICENSE).
