@@ -1,0 +1,83 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  GENERADOR DE ESPECIFICACIONES TÉCNICAS CON IA
+#  Stack: n8n + Groq + Kroki (diagramas UML) + Gotenberg (PDF) + interfaz web
+#
+#  ▸ Configuración: copia ".env.example" como ".env" y rellena tus valores.
+#  ▸ NO edites este archivo para cambiar puertos o claves: usa el .env
+#  ▸ La imagen de n8n está fijada a 1.118.1 a propósito. NO la cambies a
+#    "latest": las versiones 2.x tienen un bug conocido con los webhooks
+#    de producción que rompe este proyecto.
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.118.1
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - GENERIC_TIMEZONE=${TZ:-Europe/Madrid}
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      # ── Clave de IA (defínela en el archivo .env) ──────────────────
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      # ── URLs base (usan el puerto elegido en .env) ─────────────────
+      - N8N_EDITOR_BASE_URL=http://localhost:${N8N_PORT:-5678}
+      - WEBHOOK_URL=http://localhost:${N8N_PORT:-5678}
+      # ── Necesario para que los nodos Code lean $env.GROQ_API_KEY ──
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # ── Payloads grandes (PDF en base64) ───────────────────────────
+      - N8N_PAYLOAD_SIZE_MAX=32
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # Convierte HTML → PDF (solo accesible dentro de la red Docker)
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+    restart: unless-stopped
+    expose:
+      - "3000"
+    command:
+      - "gotenberg"
+      - "--chromium-disable-javascript=false"
+      - "--chromium-allow-list=file:///tmp/.*"
+
+  # Renderiza diagramas UML/PlantUML/Mermaid (solo red interna)
+  kroki:
+    image: yuzutech/kroki:latest
+    container_name: kroki
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - KROKI_MAX_URI_LENGTH=8192
+      - KROKI_MERMAID_HOST=kroki-mermaid
+      - KROKI_MERMAID_PORT=8002
+    depends_on:
+      - kroki-mermaid
+
+  kroki-mermaid:
+    image: yuzutech/kroki-mermaid:latest
+    container_name: kroki-mermaid
+    restart: unless-stopped
+    expose:
+      - "8002"
+
+  # Interfaz web + proxy hacia los webhooks de n8n
+  web:
+    image: nginx:alpine
+    container_name: spec-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - n8n
+
+volumes:
+  n8n_data:

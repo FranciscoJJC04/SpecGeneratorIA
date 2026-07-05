@@ -1,0 +1,62 @@
+ENTREVISTA CON EL CLIENTE — PROYECTO "VETCARE"
+
+Cliente: Clínica Veterinaria "Patitas Felices", una clínica de tamaño medio con tres
+veterinarios, dos auxiliares y una recepcionista. Atienden una media de 40 mascotas al día.
+Solicitante: Dra. Marta Ruiz, directora de la clínica.
+
+CONTEXTO Y PROBLEMA ACTUAL:
+Actualmente la clínica gestiona todo en papel y en una hoja de cálculo compartida. Las citas
+se apuntan en una agenda física, los historiales clínicos de cada animal están en carpetas, y
+la facturación se hace manualmente. Esto provoca citas duplicadas, historiales que se traspapelan,
+y mucho tiempo perdido buscando información de pacientes antiguos. Además, se olvidan de avisar
+a los dueños cuando toca una vacuna o una revisión, y pierden clientes por ello.
+
+QUÉ QUIEREN CONSEGUIR:
+La directora quiere una aplicación web para digitalizar toda la clínica. El objetivo principal es
+centralizar la gestión de pacientes, citas e historiales clínicos, y automatizar los recordatorios
+de vacunas y revisiones para no perder clientes.
+
+USUARIOS DEL SISTEMA:
+- La recepcionista: gestiona la agenda, da de alta clientes y mascotas nuevas, y cobra las facturas.
+- Los veterinarios: consultan y actualizan el historial clínico de cada animal durante la consulta,
+  registran diagnósticos, tratamientos y prescripciones.
+- Los auxiliares: registran pesos, vacunas administradas y preparan el material de las consultas.
+- La directora (administradora): consulta informes de facturación, gestiona los usuarios del
+  sistema y da de alta o baja a los empleados.
+- El propio sistema debe enviar automáticamente recordatorios de vacunas y revisiones por correo
+  electrónico a los dueños, sin que nadie tenga que hacerlo manualmente.
+
+FUNCIONALIDADES QUE NECESITAN:
+- Registrar clientes (dueños) con sus datos de contacto y sus mascotas asociadas.
+- Ficha de cada mascota: especie, raza, fecha de nacimiento, peso, alergias e historial clínico completo.
+- Agenda de citas con vista diaria y semanal, evitando solapamientos entre veterinarios.
+- Registro de consultas: motivo, diagnóstico, tratamiento y prescripción, todo asociado al historial.
+- Registro del calendario de vacunación de cada mascota.
+- Recordatorios automáticos por correo cuando se acerca una vacuna o revisión.
+- Facturación: generar facturas de las consultas y servicios, con posibilidad de imprimirlas.
+- Informes para la dirección: ingresos por periodo, número de consultas, clientes nuevos.
+
+REQUISITOS NO FUNCIONALES:
+- El sistema debe ser rápido: las consultas del historial no deberían tardar más de 2 segundos.
+- Debe soportar al menos 10 usuarios trabajando a la vez sin ralentizarse.
+- La información médica y de los clientes es sensible, así que debe estar protegida y cifrada.
+- Debe estar disponible en horario de clínica (de 9:00 a 21:00) prácticamente sin caídas.
+- La interfaz tiene que ser muy sencilla, porque la recepcionista no tiene perfil técnico.
+
+RESTRICCIONES Y ASPECTOS LEGALES:
+- Deben cumplir la normativa de protección de datos (RGPD), ya que guardan datos personales de los dueños.
+- Prefieren una solución web accesible desde el navegador, sin instalar nada en cada ordenador.
+- No quieren depender de servidores físicos propios; les han recomendado algo "en la nube".
+
+TECNOLOGÍAS PREFERIDAS:
+Aplicación web responsive, base de datos relacional, despliegue en la nube. El envío de correos
+puede externalizarse a un servicio de terceros.
+
+PRESUPUESTO Y PLAZO:
+Disponen de un presupuesto aproximado de 20.000 € para el primer año. Les gustaría tener una
+primera versión funcional en unos 3 meses. La clínica ya tiene una cartera de unos 800 clientes
+recurrentes que migrarían al nuevo sistema.
+
+INFORMACIÓN ADICIONAL:
+De momento NO quieren gestionar la tienda de productos ni las ventas de pienso; eso lo llevan
+por otro lado y prefieren dejarlo fuera del alcance de esta primera versión.

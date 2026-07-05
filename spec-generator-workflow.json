@@ -1,0 +1,976 @@
+{
+  "name": "Generador de Especificaciones Técnicas con IA",
+  "nodes": [
+    {
+      "id": "node-001",
+      "name": "Webhook - Entrada",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generar",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "9a44df13-ad34-49e7-ad27-83e3afd0e7b1"
+    },
+    {
+      "id": "node-002",
+      "name": "Switch - Tipo de Entrada",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "c-cero",
+                    "leftValue": "={{ $json.body.modo }}",
+                    "rightValue": "cero",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cero"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "c-mod",
+                    "leftValue": "={{ $json.body.modo }}",
+                    "rightValue": "modificar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Modificar"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-003",
+      "name": "Set - Datos Entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        160
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst texto = String(body.texto || '').trim();\nreturn [{\n  json: {\n    texto_entrada: 'SOLICITUD DE ESPECIFICACIÓN TÉCNICA\\n\\n' + texto,\n    metadata: {\n      nombre_proyecto: body.nombre_proyecto || 'Especificacion Tecnica',\n      solicitante: 'Interfaz Web',\n      fecha: new Date().toISOString().split('T')[0]\n    }\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-010",
+      "name": "Code - Preparar Contexto Solapamiento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        180
+      ],
+      "parameters": {
+        "jsCode": "const textoExtraido = $input.first().json.text || '';\n\nlet textoNuevo = '';\nlet metadata = {};\ntry {\n  const src = $('Set - Datos Modificar').first().json;\n  textoNuevo = src.texto_entrada || '';\n  metadata = src.metadata || {};\n} catch (e) {}\n\n// Fallback robusto: si el texto nuevo no llegó (solo la cabecera), leerlo del webhook\nconst soloContenido = textoNuevo.replace(/SOLICITUD DE MODIFICACI[ÓO]N \\/ AMPLIACI[ÓO]N/i, '').trim();\nif (soloContenido.length < 15) {\n  try {\n    const body = $('Webhook - Entrada').first().json.body || {};\n    if (body.texto && String(body.texto).trim()) {\n      textoNuevo = 'SOLICITUD DE MODIFICACIÓN / AMPLIACIÓN\\n\\n' + String(body.texto).trim();\n    }\n  } catch (e) {}\n}\n\nlet textoDocPrevio = textoExtraido\n  .replace(/\\x00/g, '')\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim()\n  .substring(0, 8000);\n\nif (!textoDocPrevio || textoDocPrevio.length < 20) {\n  textoDocPrevio = 'No se pudo extraer contenido legible del documento previo (PDF vacio o solo imagenes).';\n}\n\nreturn [{\n  json: {\n    texto_entrada: textoNuevo,\n    metadata: metadata,\n    texto_doc_previo: textoDocPrevio,\n    nombre_doc_previo: 'Documento subido por el usuario'\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-010b",
+      "name": "Code - Preparar Body Groq Solapamiento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        180
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Limitar el doc previo para que el modelo no se ancle solo en el (y por TPM)\nconst docPrevio = (data.texto_doc_previo || '').substring(0, 5000);\n\nconst prompt = [\n  'Eres un experto en analisis de requisitos. Debes decidir si DOS documentos describen EL MISMO sistema de software o DOS sistemas DISTINTOS.',\n  '',\n  'CRITERIO DE DECISION (mismo_sistema):',\n  '- mismo_sistema = true SOLO si ambos resuelven el MISMO problema de negocio, para el MISMO dominio y los MISMOS usuarios.',\n  '  Ejemplo true: una v1 de \"gestion de inventario\" y una ampliacion que le añade reservas/analitica del mismo inventario.',\n  '- mismo_sistema = false si pertenecen a dominios o propositos de negocio DISTINTOS, aunque compartan tecnologias o conceptos genericos (login, base de datos, pagos, etc.).',\n  '  Ejemplo false: un \"sistema de gestion de recursos empresariales\" y una \"tienda online de mascotas\" son sistemas DISTINTOS.',\n  '- Que ambos sean aplicaciones web, usen autenticacion o base de datos NO los hace el mismo sistema.',\n  '- Si tienes dudas y los dominios de negocio no coinciden claramente, responde false.',\n  '',\n  '## NUEVA NECESIDAD (lo que se solicita ahora):',\n  data.texto_entrada || '',\n  '',\n  '## DOCUMENTO PREVIO (PDF aportado por el usuario):',\n  docPrevio,\n  '',\n  'Compara el PROPOSITO y DOMINIO de negocio de ambos. Devuelve SOLO un JSON con estos campos:',\n  '- mismo_sistema: true o false',\n  '- nivel_relacion: \"alto\", \"medio\", \"bajo\" o \"ninguno\"',\n  '- justificacion_relacion: una frase indicando el dominio de cada uno y por que son (o no) el mismo sistema',\n  '- resumen_ejecutivo: resumen del analisis',\n  '- solapamientos_detectados: array de strings (vacio si son sistemas distintos)',\n  '- colisiones: array de strings (vacio si son sistemas distintos)',\n  '- redundancias: array de strings (vacio si son sistemas distintos)',\n  '- elementos_nuevos: array de strings',\n  '- recomendaciones: array de strings',\n  '- impacto_estimado: \"alto\", \"medio\" o \"bajo\"'\n].join('\\n');\n\nreturn [{\n  json: {\n    ...data,\n    groq_api_key: $env.GROQ_API_KEY || '',\n    groq_solap_body: {\n      model: 'llama-3.3-70b-versatile',\n      messages: [\n        { role: 'system', content: 'Eres un analista de requisitos riguroso. Distingues si dos documentos describen el mismo sistema comparando su dominio y proposito de negocio, no solo sus tecnologias. Sistemas de dominios distintos son sistemas distintos aunque compartan conceptos genericos. Respondes SOLO con JSON valido, sin texto adicional.' },\n        { role: 'user', content: prompt }\n      ],\n      max_tokens: 1500,\n      temperature: 0.1,\n      response_format: { type: 'json_object' }\n    }\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-011",
+      "name": "HTTP - Groq Analisis Solapamiento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.groq_api_key }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.groq_solap_body) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "node-012",
+      "name": "Code - Procesar Informe Solapamiento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        180
+      ],
+      "parameters": {
+        "jsCode": "const groqResponse = $input.first().json;\nlet informeSolapamiento = {};\n\ntry {\n  const content = groqResponse?.choices?.[0]?.message?.content || '{}';\n  informeSolapamiento = JSON.parse(content);\n} catch (e) {\n  informeSolapamiento = { error: 'Error: ' + e.message, resumen_ejecutivo: 'Error en analisis' };\n}\n\nconst prevData = $('Code - Preparar Contexto Solapamiento').first().json;\n\nreturn [{\n  json: {\n    texto_entrada: prevData.texto_entrada,\n    metadata: prevData.metadata,\n    informe_solapamiento: informeSolapamiento,\n    es_mismo_sistema: !(informeSolapamiento.mismo_sistema === false || informeSolapamiento.mismo_sistema === \"false\"),\n    texto_doc_previo: prevData.texto_doc_previo || \"\",\n    nombre_doc_previo: prevData.nombre_doc_previo || \"\",\n    tiene_docs_previos: true\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-013",
+      "name": "Set - Sin Documentacion Previa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const src = $('Set - Datos Entrada').first().json;\nreturn [{\n  json: {\n    texto_entrada: src.texto_entrada || '',\n    metadata: src.metadata || {},\n    informe_solapamiento: {\n      resumen_ejecutivo: 'Sin documentación previa - Primera versión',\n      solapamientos_detectados: [], colisiones: [], redundancias: [],\n      elementos_nuevos: ['Todo el alcance es nuevo'],\n      recomendaciones: ['Proceder con generación completa'],\n      impacto_estimado: 'N/A'\n    },\n    tiene_docs_previos: false,\n    texto_doc_previo: ''\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-014",
+      "name": "Merge - Unir Ramas A y B",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2640,
+        300
+      ],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2,
+        "options": {}
+      }
+    },
+    {
+      "id": "node-014b",
+      "name": "Code - Preparar Body Groq Borrador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst tienePrevio = data.tiene_docs_previos === true && (data.texto_doc_previo || '').length > 50;\nconst docPrevio = (data.texto_doc_previo || '').substring(0, 6000);\n\nconst cabecera = tienePrevio\n  ? [\n      'Eres un arquitecto de software senior experto en ingenieria de requisitos.',\n      'Tu tarea es generar una ESPECIFICACION TECNICA CONSOLIDADA Y AMPLIADA.',\n      '',\n      'IMPORTANTE - INTEGRACION CON DOCUMENTO PREVIO:',\n      '- Ya existe una especificacion previa del MISMO sistema (incluida abajo).',\n      '- Debes generar UN UNICO documento que CONSERVE todos los requisitos, casos de uso,',\n      '  entidades y demas elementos del documento previo que sigan siendo validos,',\n      '  Y ADEMAS incorpore las nuevas funcionalidades de la nueva necesidad.',\n      '- Manten los IDs existentes (RF-001, CU-001, etc.) para lo que ya existia,',\n      '  y asigna IDs nuevos correlativos a lo que se añade.',\n      '- Si la nueva necesidad modifica algo existente, actualizalo y reflejalo.',\n      '- El resultado debe ser la version COMPLETA del sistema, no solo lo nuevo.',\n      '- Sube el numero de version (por ejemplo de 1.0 a 1.1).',\n      '',\n      '## DOCUMENTO PREVIO EXISTENTE (a conservar y ampliar):',\n      docPrevio,\n      '',\n      '## ANALISIS DE SOLAPAMIENTO:',\n      JSON.stringify(data.informe_solapamiento || {}, null, 2),\n      '',\n      '## NUEVA NECESIDAD A INCORPORAR:',\n      data.texto_entrada || ''\n    ]\n  : [\n      'Eres un arquitecto de software senior experto en ingenieria de requisitos.',\n      '',\n      '## SOLICITUD DEL SISTEMA:',\n      data.texto_entrada || ''\n    ];\n\nconst guias = [\n  '',\n  'Genera la especificacion tecnica COMPLETA y DETALLADA. Rellena TODOS los campos con contenido real y especifico del sistema solicitado (no generico).',\n  'Extrae TODOS los requisitos, casos de uso, actores y entidades que puedas identificar del texto. Para un sistema completo genera tipicamente: 6-10 requisitos funcionales, 4-6 no funcionales, 3-5 requisitos de informacion, 5-8 casos de uso y 3-5 actores. No te quedes corto: cubre todas las funcionalidades mencionadas.',\n  'Los \"estudios_viabilidad\" deben ser analisis desarrollados y detallados (parrafos completos, no frases sueltas).',\n  'CRITICO: Completa SIEMPRE el JSON entero hasta la ultima llave de cierre.',\n  '',\n  'GUIAS PARA LAS SECCIONES ESPECIALES:',\n  '- \"metodos\" de cada entidad: operaciones semanticamente propias de esa clase (verbos en infinitivo con parentesis, ej: \"validarCredenciales()\", \"calcularStock()\"), coherentes con los casos de uso. NO uses siempre crear/actualizar/eliminar genericos.',\n  '- \"analisis_calidad\": evalua la calidad de los requisitos. Incluye SOLO los aspectos RELEVANTES e INTERESANTES para esta solicitud concreta (no todos son obligatorios). Aspectos posibles: \"Independencia del diseño\", \"Concision\", \"Realizabilidad\", \"Consistencia externa\", \"Ambiguedad\", \"Verificabilidad\". ' + (tienePrevio ? 'Como HAY documento previo, analiza especialmente la consistencia externa y evalua si conviene incluir cada aspecto.' : 'Incluye 3-5 aspectos que aporten valor a esta especificacion.'),\n  '- \"matriz_trazabilidad\": relaciona CADA requisito funcional (RF) con el/los caso(s) de uso (CU) que lo implementan. TODO requisito funcional debe aparecer en la matriz. Si un requisito no tiene ningun caso de uso que lo cubra, deja su \"casos_uso\" como array vacio (se marcara como ALERTA de posible funcionalidad no diseñada). Asegurate de que los casos de uso definidos cubran los requisitos funcionales.',\n  '- \"actores\": identifica TODOS los actores (un actor por cada tipo de usuario o rol mencionado, mas los sistemas externos). El SISTEMA nunca es un actor; los procesos automaticos usan el actor \"Temporizador\". HERENCIA DE ACTORES: cuando varios roles comparten funcionalidad, crea un actor GENERAL y haz que los especificos hereden de el con \"hereda_de\" (ejemplo: si Cliente y Administrador ambos pueden iniciar/cerrar sesion, crea un actor \"Usuario\" con esas acciones y pon \"hereda_de\": \"Usuario\" en Cliente y Administrador). Genera al menos 3 actores.',\n  '- \"casos_de_uso\": genera un caso de uso por cada funcionalidad importante del sistema (al menos 5). Cada uno con flujo_principal de 4-7 pasos (cuanto mas detallado, mejor el diagrama de actividad), flujos_alternativos (excepciones/variantes, generan las decisiones del diagrama), precondiciones y postcondiciones reales. En \"actores_secundarios\" añade otros actores que participen ademas del principal. NO te limites a uno o dos casos de uso.',\n  '- \"relaciones_casos_uso\": relaciones include/extend entre casos de uso (enriquecen el diagrama, evitan que sea lineal). Cada relacion tiene \"tipo\" (\"include\" o \"extend\"), \"caso_base\" (el caso de uso PRINCIPAL y completo) y \"caso_secundario\" (la sub-funcion). Para \"include\": el caso_base SIEMPRE ejecuta al caso_secundario (ej: caso_base \"CU-010 Generar informe\" incluye caso_secundario \"CU-011 Mostrar informe\"). Para \"extend\": el caso_secundario amplia OPCIONALMENTE al caso_base (ej: caso_base \"CU-005 Iniciar sesion\", caso_secundario \"CU-012 Restaurar contraseña\"). IMPORTANTE: los casos_secundarios (incluidos y extensiones) son sub-funciones que NO se asocian directamente con ningun actor. Los casos comunes (validar, autenticar, notificar, mostrar) suelen ser incluidos por varios. Genera 3-6 relaciones con ids CU-XXX.',\n  '- \"relaciones_entidades\": relaciones UML entre las entidades del diagrama de CLASES. Forma un GRAFO conectado, NO una cadena lineal: una entidad puede relacionarse con varias. Cada relacion: origen y destino (nombres de entidad), \"tipo\" (asociacion, composicion, agregacion o herencia), \"mult_origen\" y \"mult_destino\" (ej: \"1\", \"0..*\", \"1..*\") y \"etiqueta\" (verbo, ej: \"posee\"). Usa composicion para partes que no existen sin el todo, agregacion para partes compartibles, y herencia cuando una entidad es un tipo especializado de otra. Genera al menos tantas relaciones como entidades.',\n  '- \"integraciones_externas\": servicios externos con los que se integra el sistema (ej: \"Pasarela de pago\", \"Servicio de email\", \"API de mapas\"), para el diagrama de componentes.',\n  '- \"estudios_viabilidad\": analiza EN PROFUNDIDAD las 7 dimensiones. Para CADA una escribe un \"analisis\" DESARROLLADO (parrafo de 3 a 5 frases con razonamiento real, NO una sola linea generica) y una \"conclusion\" (Viable / Viable con condiciones / No viable). Detalles por dimension:',\n  '    * Tecnica: en \"puntos_clave\" lista los componentes y tecnologias clave (arquitectura, base de datos, integraciones, despliegue).',\n  '    * Economica: incluye \"proyeccion\" con ingresos y costes estimados en euros para 3 años (cifras realistas y coherentes), y ademas \"inversion_inicial\", \"payback\" (cuando se recupera la inversion) y \"roi\" (retorno sobre la inversion).',\n  '    * Operacional: en \"flujo_operativo\" describe los pasos principales de operacion del sistema.',\n  '    * Temporal: en \"cronograma\" desglosa las fases del proyecto con su duracion (deben sumar un plazo total coherente).',\n  '- \"estudio_alternativas\": presenta 2-3 alternativas reales de implementacion (arquitecturas, tecnologias o enfoques distintos) con ventajas y desventajas concretas. Incluye \"recomendaciones\" (cual conviene y por que) y \"aprobaciones\" (quien debe aprobar cada decision).',\n  '',\n  'Responde SOLO con JSON valido con esta estructura EXACTA:',\n  '{',\n  '  \"titulo_documento\": \"string\",',\n  '  \"version\": \"' + (tienePrevio ? '1.1' : '1.0') + '\",',\n  '  \"fecha\": \"string\",',\n  '  \"resumen_ejecutivo\": \"string\",',\n  '  \"objetivo_del_documento\": \"string\",',\n  '  \"alcance\": \"string\",',\n  '  \"requisitos_funcionales\": [{\"id\": \"RF-001\", \"nombre\": \"\", \"descripcion\": \"\", \"prioridad\": \"Alta|Media|Baja\", \"criterios_aceptacion\": []}],',\n  '  \"requisitos_no_funcionales\": [{\"id\": \"RNF-001\", \"categoria\": \"\", \"descripcion\": \"\", \"metrica\": \"\"}],',\n  '  \"requisitos_informacion\": [{\"id\": \"RI-001\", \"entidad\": \"\", \"atributos\": [], \"metodos\": [\"validar()\", \"calcular()\"], \"descripcion\": \"\"}],',\n  '  \"relaciones_entidades\": [{\"origen\": \"Cliente\", \"destino\": \"Mascota\", \"tipo\": \"composicion\", \"mult_origen\": \"1\", \"mult_destino\": \"1..*\", \"etiqueta\": \"posee\"}],',\n  '  \"integraciones_externas\": [\"Pasarela de pago\", \"Servicio de email\"],',\n  '  \"no_requisitos\": [{\"descripcion\": \"\", \"justificacion\": \"\"}],',\n  '  \"analisis_calidad\": [{\"aspecto\": \"Verificabilidad\", \"evaluacion\": \"\", \"recomendacion\": \"\"}],',\n  '  \"matriz_trazabilidad\": [{\"requisito_id\": \"RF-001\", \"requisito_nombre\": \"\", \"casos_uso\": [\"CU-001\"]}],',\n  '  \"actores\": [{\"nombre\": \"\", \"tipo\": \"Primario|Secundario\", \"descripcion\": \"\", \"hereda_de\": \"\"}],',\n  '  \"casos_de_uso\": [{\"id\": \"CU-001\", \"nombre\": \"\", \"actor_principal\": \"\", \"actores_secundarios\": [], \"descripcion\": \"\", \"flujo_principal\": [], \"flujos_alternativos\": [], \"precondiciones\": [], \"postcondiciones\": []}],',\n  '  \"relaciones_casos_uso\": [{\"tipo\": \"include\", \"caso_base\": \"CU-010\", \"caso_secundario\": \"CU-011\"}, {\"tipo\": \"extend\", \"caso_base\": \"CU-005\", \"caso_secundario\": \"CU-012\"}],',\n  '  \"glosario\": [{\"termino\": \"\", \"definicion\": \"\"}],',\n  '  \"estudios_viabilidad\": [',\n  '    {\"tipo\": \"Tecnica\", \"analisis\": \"parrafo desarrollado de 3-5 frases\", \"puntos_clave\": [\"arquitectura web\", \"API REST\", \"BD relacional\"], \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"Economica\", \"analisis\": \"parrafo desarrollado\", \"puntos_clave\": [], \"proyeccion\": {\"anios\": [\"Año 1\", \"Año 2\", \"Año 3\"], \"ingresos\": [70000, 85000, 100000], \"costes\": [55000, 60000, 66000]}, \"inversion_inicial\": \"18.000 EUR\", \"payback\": \"Año 2\", \"roi\": \"120% a 3 años\", \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"Legal\", \"analisis\": \"parrafo desarrollado\", \"puntos_clave\": [\"RGPD\", \"aviso legal y cookies\"], \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"De Recursos\", \"analisis\": \"parrafo desarrollado\", \"puntos_clave\": [], \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"De Mercado\", \"analisis\": \"parrafo desarrollado\", \"puntos_clave\": [], \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"Operacional\", \"analisis\": \"parrafo desarrollado\", \"flujo_operativo\": [\"El usuario ...\", \"El sistema ...\"], \"conclusion\": \"Viable\"},',\n  '    {\"tipo\": \"Temporal\", \"analisis\": \"parrafo desarrollado\", \"cronograma\": [{\"fase\": \"Analisis y definicion\", \"duracion\": \"2 semanas\"}, {\"fase\": \"Diseño\", \"duracion\": \"2 semanas\"}, {\"fase\": \"Desarrollo MVP\", \"duracion\": \"5 semanas\"}, {\"fase\": \"Pruebas\", \"duracion\": \"2 semanas\"}, {\"fase\": \"Despliegue\", \"duracion\": \"1 semana\"}], \"conclusion\": \"Viable\"}',\n  '  ],',\n  '  \"estudio_alternativas\": {\"alternativas\": [{\"nombre\": \"\", \"descripcion\": \"\", \"ventajas\": [], \"desventajas\": []}], \"recomendaciones\": [], \"aprobaciones\": []},',\n  '  \"supuestos\": [],',\n  '  \"restricciones\": [],',\n  '  \"riesgos\": [{\"descripcion\": \"\", \"probabilidad\": \"\", \"impacto\": \"\", \"mitigacion\": \"\"}]',\n  '}',\n  '',\n  'RECORDATORIO FINAL OBLIGATORIO: cubre TODAS las funcionalidades y roles mencionados en el texto. Genera un minimo de 6 requisitos funcionales y un minimo de 5 casos de uso (uno por funcionalidad principal). Si generas menos, la especificacion estara incompleta.'\n];\n\nconst prompt = cabecera.concat(guias).join('\\n');\n\nreturn [{\n  json: {\n    ...data,\n    groq_api_key: $env.GROQ_API_KEY || '',\n    groq_borrador_body: {\n      model: 'llama-3.3-70b-versatile',\n      messages: [\n        { role: 'system', content: 'Eres un arquitecto de software senior. Generas especificaciones tecnicas completas y detalladas en JSON. Cuando hay documento previo, lo consolidas con la nueva necesidad conservando lo existente. Respondes SOLO con JSON valido sin markdown, sin texto adicional.' },\n        { role: 'user', content: prompt }\n      ],\n      max_tokens: 8000,\n      temperature: 0.3,\n      response_format: { type: 'json_object' }\n    }\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-015",
+      "name": "HTTP - Groq Generar Borrador Spec",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.groq_api_key }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.groq_borrador_body) }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "node-016",
+      "name": "Code - Procesar Borrador Groq",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const groqResponse = $input.first().json;\nlet especificacion = {};\n\ntry {\n  let content = groqResponse?.choices?.[0]?.message?.content || '{}';\n\n  // Limpiar markdown si lo hay\n  content = content.replace(/^```(?:json)?\\n?/i, '').replace(/\\n?```$/, '').trim();\n\n  // Eliminar caracteres de control que rompen JSON\n  content = content.replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]/g, '');\n\n  const parsed = JSON.parse(content);\n\n  // Detectar si Groq envolvió el spec en un objeto raíz (ej: { \"especificacion\": {...} })\n  if (!parsed.requisitos_funcionales && !parsed.titulo_documento) {\n    const keys = Object.keys(parsed);\n    // Si hay una sola clave y su valor es un objeto, ese es el spec real\n    if (keys.length === 1 && typeof parsed[keys[0]] === 'object' && !Array.isArray(parsed[keys[0]])) {\n      especificacion = parsed[keys[0]];\n    } else {\n      // Buscar la clave que contenga requisitos_funcionales\n      for (const key of keys) {\n        if (parsed[key]?.requisitos_funcionales || parsed[key]?.titulo_documento) {\n          especificacion = parsed[key];\n          break;\n        }\n      }\n      if (!especificacion.titulo_documento) especificacion = parsed;\n    }\n  } else {\n    especificacion = parsed;\n  }\n\n} catch (e) {\n  especificacion = {\n    titulo_documento: 'Error al procesar respuesta IA',\n    resumen_ejecutivo: 'Error de parseo: ' + e.message,\n    requisitos_funcionales: [],\n    requisitos_no_funcionales: [],\n    casos_de_uso: [],\n    riesgos: [],\n    glosario: []\n  };\n}\n\nconst prevData = $('Merge - Unir Ramas A y B').first().json;\n\nreturn [{\n  json: {\n    texto_entrada: prevData.texto_entrada,\n    metadata: prevData.metadata,\n    informe_solapamiento: prevData.informe_solapamiento,\n    tiene_docs_previos: prevData.tiene_docs_previos,\n    especificacion_borrador: especificacion\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-016b",
+      "name": "Code - Preparar Body Groq Revision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst spec = data.especificacion_borrador || {};\n\n// Enviamos solo un resumen compacto en vez del JSON completo para ahorrar tokens\nconst specResumen = {\n  titulo: spec.titulo_documento || '',\n  requisitos_funcionales: (spec.requisitos_funcionales || []).map(r => r.id + ': ' + r.nombre),\n  requisitos_no_funcionales: (spec.requisitos_no_funcionales || []).map(r => r.id + ': ' + r.descripcion),\n  casos_de_uso: (spec.casos_de_uso || []).map(c => c.id + ': ' + c.nombre),\n  riesgos: (spec.riesgos || []).map(r => r.descripcion),\n};\n\nconst prompt = [\n  'Revisa este resumen de especificacion tecnica y devuelve mejoras concretas:',\n  '',\n  JSON.stringify(specResumen, null, 2),\n  '',\n  'Solicitud original: ' + (data.texto_entrada || '').substring(0, 500),\n  '',\n  'Devuelve JSON con: { puntuacion_inicial, problemas_criticos: [], mejoras_sugeridas: [], fortalezas: [], cambios_aplicados: [], puntuacion_final }'\n].join('\\n');\n\nreturn [{\n  json: {\n    ...data,\n    groq_api_key: $env.GROQ_API_KEY || '',\n    groq_revision_body: {\n      model: 'llama-3.1-8b-instant',\n      messages: [\n        { role: 'system', content: 'Eres un revisor experto en ingenieria de requisitos. Devuelve siempre JSON valido.' },\n        { role: 'user', content: prompt }\n      ],\n      max_tokens: 2000,\n      temperature: 0.2,\n      response_format: { type: 'json_object' }\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-017",
+      "name": "HTTP - Groq Revisar Spec",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.groq_api_key }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.groq_revision_body) }}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "node-018",
+      "name": "Code - Procesar Revision Groq",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const groqResponse = $input.first().json;\nlet revisionData = {};\n\ntry {\n  const content = groqResponse?.choices?.[0]?.message?.content || '{}';\n  revisionData = JSON.parse(content);\n} catch (e) {\n  revisionData = { error: 'Error: ' + e.message };\n}\n\nconst prevData = $('Code - Procesar Borrador Groq').first().json;\n\nreturn [{\n  json: {\n    texto_entrada: prevData.texto_entrada,\n    metadata: prevData.metadata,\n    informe_solapamiento: prevData.informe_solapamiento,\n    tiene_docs_previos: prevData.tiene_docs_previos,\n    especificacion_borrador: prevData.especificacion_borrador,\n    revision_groq: revisionData,\n    especificacion_revisada: revisionData.especificacion_mejorada || prevData.especificacion_borrador\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-018b",
+      "name": "Code - Construir Documento Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// spec puede venir de la revisión o del borrador directamente\nlet spec = data.especificacion_revisada || data.especificacion_borrador || {};\n\n// Desenvuelve wrappers extra de Groq (ej: { \"especificacion\": { ... } })\nif (!spec.requisitos_funcionales && !spec.titulo_documento) {\n  const keys = Object.keys(spec).filter(k => typeof spec[k] === 'object' && !Array.isArray(spec[k]));\n  for (const k of keys) {\n    if (spec[k]?.requisitos_funcionales || spec[k]?.titulo_documento) {\n      spec = spec[k];\n      break;\n    }\n  }\n}\n\nconst fecha = new Date().toISOString().split('T')[0];\n\n// Normalizar claves de diagramas (Groq puede usar nombres distintos)\nconst dm = spec.diagramas_mermaid || {};\nconst diagramas = {\n  casos_uso:       dm.casos_uso       || dm.diagrama_casos_uso       || dm.caso_de_uso       || '',\n  flujo_principal: dm.flujo_principal || dm.diagrama_flujo_principal || dm.flujo             || '',\n  entidad_relacion:dm.entidad_relacion|| dm.diagrama_er              || dm.er                || '',\n  arquitectura:    dm.arquitectura    || dm.diagrama_arquitectura    || dm.arquitectura_sistema || ''\n};\n\nconst documentoFinal = {\n  titulo:                   spec.titulo_documento || 'Especificación Técnica del Sistema',\n  subtitulo:                'Software Requirements Specification (SRS)',\n  version:                  spec.version         || '1.0',\n  fecha:                    spec.fecha           || fecha,\n  estado:                   'Borrador para Revisión',\n  resumen_ejecutivo:        spec.resumen_ejecutivo         || '',\n  objetivo_del_documento:   spec.objetivo_del_documento    || '',\n  alcance:                  spec.alcance                   || '',\n  supuestos:                spec.supuestos                 || [],\n  restricciones:            spec.restricciones             || [],\n  requisitos_funcionales:   spec.requisitos_funcionales    || [],\n  requisitos_no_funcionales:spec.requisitos_no_funcionales || [],\n  requisitos_informacion:   spec.requisitos_informacion    || [],\n  no_requisitos:            spec.no_requisitos             || [],\n  casos_de_uso:             spec.casos_de_uso              || [],\n  riesgos:                  spec.riesgos                   || [],\n  glosario:                 spec.glosario                  || [],\n  analisis_calidad:         spec.analisis_calidad          || [],\n  matriz_trazabilidad:      spec.matriz_trazabilidad       || [],\n  actores:                  spec.actores                   || [],\n  relaciones_casos_uso:     spec.relaciones_casos_uso      || [],\n  relaciones_entidades:     spec.relaciones_entidades      || [],\n  integraciones_externas:   spec.integraciones_externas    || [],\n  estudios_viabilidad:      spec.estudios_viabilidad       || [],\n  estudio_alternativas:     spec.estudio_alternativas      || {},\n  diagramas_mermaid:        diagramas\n};\n\nreturn [{\n  json: {\n    documento_final: documentoFinal,\n    metadata:             data.metadata             || {},\n    informe_solapamiento: data.informe_solapamiento || {},\n    tiene_docs_previos:   data.tiene_docs_previos   || false\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-020",
+      "name": "Code - Preparar Diagramas para Kroki",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst doc = data.documento_final || {};\n\n// ── Sanitizadores ────────────────────────────────────────────────────────────\nfunction lbl(s, max) {\n  let t = String(s || '').trim();\n  t = t.replace(/[\"'`]/g, '');\n  t = t.replace(/[\\[\\]\\{\\}\\(\\)\\|<>]/g, '');\n  t = t.replace(/[;#]/g, '');\n  t = t.replace(/\\s+/g, ' ');\n  t = t.replace(/[áàä]/gi, 'a').replace(/[éèë]/gi, 'e').replace(/[íìï]/gi, 'i')\n       .replace(/[óòö]/gi, 'o').replace(/[úùü]/gi, 'u').replace(/ñ/gi, 'n');\n  if (max && t.length > max) t = t.slice(0, max - 1) + '.';\n  return t || 'N/A';\n}\nfunction ident(s, max) {\n  let t = String(s || '').trim();\n  t = t.replace(/[áàä]/gi, 'a').replace(/[éèë]/gi, 'e').replace(/[íìï]/gi, 'i')\n       .replace(/[óòö]/gi, 'o').replace(/[úùü]/gi, 'u').replace(/ñ/gi, 'n');\n  t = t.replace(/[^A-Za-z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');\n  if (max && t.length > max) t = t.slice(0, max).replace(/_$/, '');\n  if (!t) t = 'campo';\n  if (/^[0-9]/.test(t)) t = 'e_' + t;\n  return t;\n}\n// Normaliza un id de caso de uso \"CU-001\", \"cu 1\", \"CU1\" → \"CU001\"\nfunction normId(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }\n\n// ── 1. Casos de Uso → PlantUML con actores, sistema, include y extend ────────\nfunction buildCasosUso() {\n  const cus = (doc.casos_de_uso || []).slice(0, 14);\n  const sistema = lbl((doc.titulo || 'Sistema').replace(/Especificaci.n T.cnica del?/i, '').trim() || 'Sistema', 36);\n\n  function normalizarActor(raw) {\n    let a = lbl(raw || 'Usuario', 28);\n    if (/^(el\\s+)?sistema$|^system$|^automatic|^proceso\\s+autom/i.test(a.trim())) return 'Temporizador';\n    return a;\n  }\n\n  const lines = ['@startuml', 'left to right direction', 'skinparam packageStyle rectangle', 'skinparam shadowing false',\n    'skinparam nodesep 45', 'skinparam ranksep 60'];\n\n  if (cus.length === 0) {\n    lines.push('actor \"Usuario\" as A0', 'rectangle \"' + sistema + '\" {', '  usecase \"Caso de uso principal\" as UC0', '}', 'A0 --> UC0', '@enduml');\n    return lines.join('\\n');\n  }\n\n  // Mapa id de caso de uso → UCi\n  const cuMap = {};\n  cus.forEach((cu, i) => { cuMap[normId(cu.id) || ('CU' + i)] = 'UC' + i; });\n\n  // Relaciones include/extend normalizadas. Preferimos los campos semánticos\n  // caso_base / caso_secundario; si no vienen, usamos origen/destino (retrocompat).\n  const relaciones = (doc.relaciones_casos_uso || []).map(r => ({\n    base: cuMap[normId(r.caso_base != null ? r.caso_base : r.origen)],\n    sec:  cuMap[normId(r.caso_secundario != null ? r.caso_secundario : r.destino)],\n    esExtend: /ext/i.test(r.tipo)\n  })).filter(r => r.base && r.sec && r.base !== r.sec);\n\n  // Los casos SECUNDARIOS (el incluido y el de extensión) NO se conectan a\n  // actores: el actor llega a ellos a través del caso base.\n  const sinActor = new Set();\n  relaciones.forEach(r => sinActor.add(r.sec));\n\n  // Registrar actores. Solo los que participan en un caso CON actor,\n  // más los implicados en herencia de actores (padres/hijos).\n  const actores = {};\n  function regActor(nombre) { if (nombre && nombre !== 'N/A' && !(nombre in actores)) actores[nombre] = 'A' + Object.keys(actores).length; return actores[nombre]; }\n  cus.forEach((cu, i) => {\n    if (sinActor.has('UC' + i)) return;\n    regActor(normalizarActor(cu.actor_principal));\n    (cu.actores_secundarios || []).forEach(as => regActor(normalizarActor(as)));\n  });\n  // Herencia entre actores: un actor puede especializar a otro (hijo --|> padre)\n  const herenciaPorNombre = []; // [nombreHijo, nombrePadre]\n  (doc.actores || []).forEach(a => {\n    if (!a || !a.hereda_de) return;\n    const hijo = normalizarActor(a.nombre);\n    const padre = normalizarActor(a.hereda_de);\n    if (hijo && padre && hijo !== padre) { regActor(hijo); regActor(padre); herenciaPorNombre.push([hijo, padre]); }\n  });\n\n  // ── Reordenar actores para minimizar cruces visuales ────────────────────────\n  // Si un actor \"padre\" tiene varios hijos por herencia, colocarlo AL EXTREMO\n  // opuesto los deja lejos y sus lineas de asociacion/herencia cruzan por\n  // encima de los demas. En su lugar, el padre se intercala ENTRE sus hijos\n  // (mitad antes, mitad despues), asi cada flecha de herencia queda corta y\n  // adyacente en vez de atravesar todo el diagrama.\n  function ordenarParaLayout(nombresOriginal, herenciaPares) {\n    const hijosDePadre = {};\n    const tienePadre = new Set();\n    herenciaPares.forEach(([hijo, padre]) => {\n      (hijosDePadre[padre] = hijosDePadre[padre] || []).push(hijo);\n      tienePadre.add(hijo);\n    });\n    const colocado = new Set();\n    const resultado = [];\n    nombresOriginal.forEach(n => {\n      if (colocado.has(n)) return;\n      if (hijosDePadre[n]) {\n        const hijos = hijosDePadre[n].filter(h => !colocado.has(h));\n        const mitad = Math.floor(hijos.length / 2);\n        hijos.slice(0, mitad).forEach(h => { resultado.push(h); colocado.add(h); });\n        resultado.push(n); colocado.add(n);\n        hijos.slice(mitad).forEach(h => { resultado.push(h); colocado.add(h); });\n      } else if (!tienePadre.has(n)) {\n        resultado.push(n); colocado.add(n);\n      }\n      // Si \"n\" tiene padre y su padre aun no ha sido procesado, se omite aqui:\n      // se colocara cuando el bucle llegue al padre (bloque hijosDePadre[n] de arriba).\n    });\n    return resultado;\n  }\n  const ordenActores = ordenarParaLayout(Object.keys(actores), herenciaPorNombre);\n\n  // Declarar actores en el orden ya optimizado\n  ordenActores.forEach(nombre => lines.push('actor \"' + nombre + '\" as ' + actores[nombre]));\n\n  // Recuadro del sistema con los casos de uso\n  lines.push('rectangle \"' + sistema + '\" {');\n  cus.forEach((cu, i) => lines.push('  usecase \"' + lbl(cu.nombre || ('Caso ' + (i + 1)), 34) + '\" as UC' + i));\n  lines.push('}');\n\n  // Herencia de actores (generalización): Cliente -up-|> Usuario\n  // El hint de direccion \"up\" favorece un trazo recto y corto en vez de\n  // una curva larga que rodee otros elementos del diagrama.\n  herenciaPorNombre.forEach(([hijo, padre]) => lines.push(actores[hijo] + ' -up-|> ' + actores[padre]));\n\n  // Asociaciones actor → caso de uso (solo para casos que llevan actor)\n  cus.forEach((cu, i) => {\n    if (sinActor.has('UC' + i)) return;\n    const ap = actores[normalizarActor(cu.actor_principal)];\n    if (ap) lines.push(ap + ' --> UC' + i);\n    (cu.actores_secundarios || []).forEach(as => {\n      const aid = actores[normalizarActor(as)]; if (aid) lines.push(aid + ' --> UC' + i);\n    });\n  });\n\n  // Relaciones include / extend con DIRECCIÓN garantizada por el código\n  // (no depende de que la IA ordene bien los extremos):\n  //  · include: caso BASE ──▷ caso INCLUIDO   (punta en el incluido/dependiente)\n  //  · extend : caso EXTENSIÓN ──▷ caso BASE   (punta en el caso base) [opuesto]\n  const vistas = new Set();\n  relaciones.forEach(r => {\n    const from = r.esExtend ? r.sec : r.base;\n    const to   = r.esExtend ? r.base : r.sec;\n    const key = from + '>' + to + (r.esExtend ? 'e' : 'i');\n    if (vistas.has(key)) return; vistas.add(key);\n    lines.push(from + ' .[#0f3460].> ' + to + ' : <<' + (r.esExtend ? 'extend' : 'include') + '>>');\n  });\n\n  lines.push('@enduml');\n  return lines.join('\\n');\n}\n\n// ── 2. Actividad UML: flujo principal + múltiples decisiones ─────────────────\nfunction buildFlujo() {\n  const cu = (doc.casos_de_uso || [])[0];\n  const pasos = (cu && cu.flujo_principal && cu.flujo_principal.length)\n    ? cu.flujo_principal.slice(0, 10)\n    : (doc.requisitos_funcionales || []).slice(0, 6).map(r => r.nombre || r.descripcion);\n  const alt = (cu && cu.flujos_alternativos && cu.flujos_alternativos.length) ? cu.flujos_alternativos.slice(0, 3) : [];\n\n  const lines = ['@startuml', 'skinparam shadowing false', 'start'];\n  if (!pasos || pasos.length === 0) { lines.push(':Proceso principal;', 'stop', '@enduml'); return lines.join('\\n'); }\n\n  // Repartir las decisiones (una por cada flujo alternativo) entre los pasos.\n  // Puntos de decision equiespaciados a lo largo del flujo principal.\n  const nAlt = alt.length;\n  const puntos = {};\n  if (nAlt > 0) {\n    for (let k = 0; k < nAlt; k++) {\n      const idx = Math.min(pasos.length - 1, Math.floor(((k + 1) * pasos.length) / (nAlt + 1)));\n      (puntos[idx] = puntos[idx] || []).push(alt[k]);\n    }\n  }\n\n  pasos.forEach((p, i) => {\n    lines.push(':' + lbl(p, 48) + ';');\n    if (puntos[i]) {\n      puntos[i].forEach(a => {\n        lines.push('if (' + lbl('Condicion en paso ' + (i + 1) + '?', 40) + ') then (excepcion)');\n        lines.push('  :' + lbl(a, 48) + ';');\n        lines.push('  stop');\n        lines.push('else (ok)');\n        lines.push('endif');\n      });\n    }\n  });\n\n  lines.push('stop', '@enduml');\n  return lines.join('\\n');\n}\n\n// ── 3. Clases UML: atributos, métodos y relaciones ricas ─────────────────────\nfunction buildClases() {\n  const ents = (doc.requisitos_informacion || []).slice(0, 10);\n  const lines = ['@startuml', 'skinparam shadowing false', 'skinparam classAttributeIconSize 0'];\n\n  if (ents.length === 0) {\n    lines.push('class Entidad {', '  +id: string', '  +nombre: string', '}', '@enduml');\n    return lines.join('\\n');\n  }\n\n  // Mapa nombre-entidad → nombre de clase (para resolver relaciones)\n  const claseDe = {};\n  const ids = [];\n  ents.forEach((e, i) => {\n    let nombre = ident(e.entidad || ('Entidad' + i), 28);\n    nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);\n    if (ids.includes(nombre)) nombre = nombre + i;\n    ids.push(nombre);\n    claseDe[normId(e.entidad)] = nombre;\n    lines.push('class ' + nombre + ' {');\n    const attrs = (e.atributos && e.atributos.length ? e.atributos : ['id', 'nombre']).slice(0, 6);\n    const usados = {};\n    attrs.forEach(a => { let an = ident(a, 28); if (usados[an]) an = an + (usados[an]++); else usados[an] = 1; lines.push('  +' + an + ': string'); });\n    const metodos = (e.metodos && e.metodos.length ? e.metodos : []).slice(0, 6);\n    if (metodos.length > 0) {\n      lines.push('  --');\n      const um = {};\n      metodos.forEach(m => { let mn = ident(String(m).replace(/\\(\\s*\\)\\s*$/, ''), 28); if (um[mn]) mn = mn + (um[mn]++); else um[mn] = 1; lines.push('  +' + mn + '()'); });\n    }\n    lines.push('}');\n  });\n\n  // Relaciones explícitas generadas por la IA\n  const rels = doc.relaciones_entidades || [];\n  let dibujadas = 0;\n  rels.forEach(r => {\n    const o = claseDe[normId(r.origen)];\n    const d = claseDe[normId(r.destino)];\n    if (!o || !d || o === d) return;\n    const mo = lbl(r.mult_origen || r.cardinalidad_origen || '1', 8);\n    const md = lbl(r.mult_destino || r.cardinalidad_destino || r.cardinalidad || '0..*', 8);\n    const et = r.etiqueta ? ' : ' + lbl(r.etiqueta, 24) : '';\n    const tipo = String(r.tipo || 'asociacion').toLowerCase();\n    let linea;\n    if (/herenc|generaliz|extend|hereda/.test(tipo))      linea = d + ' --|> ' + o;                       // destino hereda de origen\n    else if (/composic/.test(tipo))                       linea = o + ' \"' + mo + '\" *-- \"' + md + '\" ' + d + et;\n    else if (/agregac/.test(tipo))                        linea = o + ' \"' + mo + '\" o-- \"' + md + '\" ' + d + et;\n    else if (/dependenc/.test(tipo))                      linea = o + ' ..> ' + d + et;\n    else                                                  linea = o + ' \"' + mo + '\" -- \"' + md + '\" ' + d + et; // asociacion\n    lines.push(linea);\n    dibujadas++;\n  });\n\n  // Fallback: si la IA no aportó relaciones, encadenar (mejor que nada)\n  if (dibujadas === 0) {\n    for (let i = 0; i < ids.length - 1; i++) lines.push(ids[i] + ' \"1\" -- \"0..*\" ' + ids[i + 1]);\n  }\n\n  lines.push('@enduml');\n  return lines.join('\\n');\n}\n\n// ── 4. Componentes UML ───────────────────────────────────────────────────────\nfunction buildComponentes() {\n  const sistema = lbl((doc.titulo || 'Sistema').replace(/Especificaci.n T.cnica del?/i, '').trim() || 'Sistema', 30);\n  const lines = ['@startuml', 'skinparam shadowing false', 'left to right direction',\n    'actor \"Usuario\" as U',\n    'component \"Frontend Web\" as FE',\n    'component \"API REST\" as API',\n    'component \"' + sistema + '\" as BL',\n    'database \"Base de Datos\" as DB',\n    'U --> FE', 'FE --> API : HTTP/JSON', 'API --> BL', 'BL --> DB : SQL'];\n  // Añadir servicios externos según integraciones detectadas\n  const ext = (doc.integraciones_externas || []).slice(0, 4);\n  if (ext.length) {\n    ext.forEach((e, i) => { lines.push('component \"' + lbl(e, 26) + '\" as EXT' + i); lines.push('BL --> EXT' + i); });\n  } else {\n    lines.push('component \"Servicios Externos\" as EXT', 'BL --> EXT');\n  }\n  lines.push('@enduml');\n  return lines.join('\\n');\n}\n\nconst diagramas = [\n  { nombre: 'casos_uso',        motor: 'plantuml', code: buildCasosUso(),    titulo: 'Diagrama de Casos de Uso (UML)' },\n  { nombre: 'flujo_principal',  motor: 'plantuml', code: buildFlujo(),       titulo: 'Diagrama de Actividad (UML)' },\n  { nombre: 'entidad_relacion', motor: 'plantuml', code: buildClases(),      titulo: 'Diagrama de Clases (UML)' },\n  { nombre: 'arquitectura',     motor: 'plantuml', code: buildComponentes(), titulo: 'Diagrama de Componentes (UML)' }\n];\n\nreturn diagramas.map(d => ({\n  json: {\n    documento_final: doc,\n    metadata: data.metadata,\n    informe_solapamiento: data.informe_solapamiento,\n    tiene_docs_previos: data.tiene_docs_previos,\n    nombre_diagrama: d.nombre,\n    motor_diagrama: d.motor,\n    kroki_url: 'http://kroki:8000/' + d.motor + '/png',\n    mermaid_code: d.code,\n    titulo_diagrama: d.titulo\n  }\n}));\n"
+      }
+    },
+    {
+      "id": "node-021",
+      "name": "HTTP - Kroki Renderizar Diagrama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4620,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.kroki_url }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.mermaid_code }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "image/png"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "diagram_image"
+            }
+          }
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "node-022",
+      "name": "Code - Procesar Imagenes Diagramas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n// Recuperar lista original por indice (Kroki puede perder json al fallar)\nconst originales = $(\"Code - Preparar Diagramas para Kroki\").all();\n\nconst results = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const item = items[idx];\n  const orig = originales[idx]?.json || {};\n  const nombre = item.json?.nombre_diagrama || orig.nombre_diagrama || (\"diagrama_\" + idx);\n  const titulo = item.json?.titulo_diagrama || orig.titulo_diagrama || \"\";\n\n  let imagen_src = \"\";\n  let error_detalle = \"\";\n\n  try {\n    // Determinar la clave binaria disponible\n    const binKey = item.binary?.diagram_image\n      ? \"diagram_image\"\n      : (item.binary ? Object.keys(item.binary)[0] : null);\n\n    if (binKey) {\n      // Helper oficial: funciona en memoria y en filesystem, devuelve Buffer real\n      const buffer = await this.helpers.getBinaryDataBuffer(idx, binKey);\n      // Validar firma PNG en los bytes reales: 89 50 4E 47 0D 0A 1A 0A\n      const isPng = buffer.length > 8 &&\n        buffer[0] === 0x89 && buffer[1] === 0x50 &&\n        buffer[2] === 0x4e && buffer[3] === 0x47;\n      if (isPng) {\n        imagen_src = \"data:image/png;base64,\" + buffer.toString(\"base64\");\n      } else {\n        error_detalle = \"Respuesta no-PNG de Kroki: \" + buffer.toString(\"utf-8\").slice(0, 160);\n      }\n    } else {\n      const err = item.json?.error;\n      if (err) error_detalle = typeof err === \"string\" ? err : (err.message || JSON.stringify(err));\n      else error_detalle = \"Sin binario (status \" + (item.json?.statusCode ?? \"?\") + \")\";\n    }\n  } catch (e) {\n    error_detalle = \"Excepcion: \" + e.message;\n  }\n\n  results.push({\n    json: {\n      documento_final:      item.json?.documento_final || orig.documento_final,\n      metadata:             item.json?.metadata || orig.metadata,\n      informe_solapamiento: item.json?.informe_solapamiento || orig.informe_solapamiento,\n      tiene_docs_previos:   item.json?.tiene_docs_previos ?? orig.tiene_docs_previos,\n      nombre_diagrama:      nombre,\n      titulo_diagrama:      titulo,\n      mermaid_code:         item.json?.mermaid_code || orig.mermaid_code,\n      imagen_src,\n      error_detalle\n    }\n  });\n}\n\nreturn results;\n"
+      }
+    },
+    {
+      "id": "node-023",
+      "name": "Code - Agregar Imagenes al Contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Recuperar documento_final desde items (Kroki devuelve los items originales con skip o con imagen)\nlet doc = {};\nlet metadata = {};\nlet informe = {};\nlet tiene_docs = false;\n\nfor (const item of items) {\n  if (item.json?.documento_final?.titulo) {\n    doc      = item.json.documento_final;\n    metadata = item.json.metadata || {};\n    informe  = item.json.informe_solapamiento || {};\n    tiene_docs = item.json.tiene_docs_previos || false;\n    break;\n  }\n}\n\n// Fallback si ningún item trajo el documento\nif (!doc.titulo) {\n  const src = $('Code - Construir Documento Final').first().json;\n  doc      = src.documento_final || {};\n  metadata = src.metadata || {};\n  informe  = src.informe_solapamiento || {};\n  tiene_docs = src.tiene_docs_previos || false;\n}\n\n// Recoger imágenes PNG de los items de Kroki\nconst imgs = {};\nconst imgErrors = {};\nfor (const item of items) {\n  const nombre = item.json?.nombre_diagrama;\n  if (!nombre) continue;\n  if (item.json?.imagen_src) imgs[nombre] = item.json.imagen_src;\n  else if (item.json?.error_detalle) imgErrors[nombre] = item.json.error_detalle;\n}\n\n// ── helpers ──────────────────────────────────────────────────────────────────\nconst esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\n\nfunction stripHtml(s) { return (s || '').replace(/<[^>]+>/g, '').trim(); }\n\nfunction sec(num, titulo, contenido) {\n  return '<div class=\"seccion\"><div class=\"sec-header\"><div class=\"sec-num\">' + num + '</div><h2>' + esc(titulo) + '</h2></div><div class=\"sec-body\">' + contenido + '</div></div>';\n}\n\nfunction tabla(cols, filas) {\n  const ths = cols.map(c => '<th>' + esc(c) + '</th>').join('');\n  const body = filas || ('<tr><td colspan=\"' + cols.length + '\" style=\"color:#999;font-style:italic\">Sin datos registrados.</td></tr>');\n  return '<table><thead><tr>' + ths + '</tr></thead><tbody>' + body + '</tbody></table>';\n}\n\nfunction imgDiagrama(key, titulo) {\n  const src = imgs[key] || '';\n  if (!src) {\n    const err = imgErrors[key] || 'Causa desconocida';\n    return '<p style=\"color:#b91c1c;font-style:italic;font-size:8pt;\">Diagrama no disponible. Detalle: ' + esc(err) + '</p>';\n  }\n  return '<div class=\"diagrama-box\"><div class=\"diagrama-title\">' + esc(titulo) + '</div><img src=\"' + src + '\" alt=\"' + esc(titulo) + '\"></div>';\n}\n\n// ── construir contenido de cada sección ──────────────────────────────────────\nconst rfRows = (doc.requisitos_funcionales || []).map(r =>\n  '<tr><td><strong>' + esc(r.id) + '</strong></td><td>' + esc(r.nombre) + '</td><td>' + esc(r.descripcion) + '</td><td>' + esc(r.prioridad) + '</td><td>' + (r.criterios_aceptacion||[]).map(esc).join('<br>') + '</td></tr>'\n).join('') || null;\n\nconst rnfRows = (doc.requisitos_no_funcionales || []).map(r =>\n  '<tr><td><strong>' + esc(r.id) + '</strong></td><td>' + esc(r.categoria) + '</td><td>' + esc(r.descripcion) + '</td><td>' + esc(r.metrica) + '</td></tr>'\n).join('') || null;\n\nconst riRows = (doc.requisitos_informacion || []).map(r =>\n  '<tr><td><strong>' + esc(r.id) + '</strong></td><td>' + esc(r.entidad) + '</td><td>' + (r.atributos||[]).map(esc).join(', ') + '</td><td>' + esc(r.descripcion) + '</td></tr>'\n).join('') || null;\n\nconst noReqRows = (doc.no_requisitos || []).map(r =>\n  '<tr><td>' + esc(r.descripcion) + '</td><td>' + esc(r.justificacion) + '</td></tr>'\n).join('') || null;\n\nconst cuBlocks = (doc.casos_de_uso || []).length\n  ? (doc.casos_de_uso || []).map(cu =>\n      '<div class=\"cu-block\"><h4>' + esc(cu.id) + ': ' + esc(cu.nombre) + '</h4><table>' +\n      '<tr><th width=\"160\">Actor principal</th><td>' + esc(cu.actor_principal) + '</td></tr>' +\n      '<tr><th>Descripción</th><td>' + esc(cu.descripcion) + '</td></tr>' +\n      '<tr><th>Flujo principal</th><td><ol>' + (cu.flujo_principal||[]).map(f=>'<li>'+esc(f)+'</li>').join('') + '</ol></td></tr>' +\n      (cu.flujos_alternativos?.length ? '<tr><th>Flujos alternativos</th><td><ul>' + cu.flujos_alternativos.map(f=>'<li>'+esc(f)+'</li>').join('') + '</ul></td></tr>' : '') +\n      '<tr><th>Precondiciones</th><td>' + (cu.precondiciones||[]).map(esc).join(' · ') + '</td></tr>' +\n      '<tr><th>Postcondiciones</th><td>' + (cu.postcondiciones||[]).map(esc).join(' · ') + '</td></tr>' +\n      '</table></div>'\n    ).join('')\n  : '<p style=\"color:#999;font-style:italic;\">Sin casos de uso registrados.</p>';\n\nconst riesgoRows = (doc.riesgos || []).map(r =>\n  '<tr><td>' + esc(r.descripcion) + '</td><td>' + esc(r.probabilidad) + '</td><td>' + esc(r.impacto) + '</td><td>' + esc(r.mitigacion) + '</td></tr>'\n).join('') || null;\n\nconst glosarioRows = (doc.glosario || []).map(g =>\n  '<tr><td><strong>' + esc(g.termino) + '</strong></td><td>' + esc(g.definicion) + '</td></tr>'\n).join('') || null;\n\n// Sección 1: Introducción (distinta del resumen)\nconst objDoc  = esc(doc.objetivo_del_documento || 'Este documento describe los requisitos técnicos del sistema ' + stripHtml(doc.titulo||'') + ', sirviendo de referencia para el equipo de desarrollo, QA y stakeholders del proyecto.');\nconst alcanceStr = esc(doc.alcance || 'Cubre los requisitos funcionales, no funcionales, casos de uso, diagramas de arquitectura y glosario del sistema.');\nconst supuestosLi    = (doc.supuestos    || []).map(s => '<li>' + esc(s) + '</li>').join('');\nconst restriccionesLi = (doc.restricciones || []).map(s => '<li>' + esc(s) + '</li>').join('');\nconst introd =\n  '<p><strong>Objetivo del documento:</strong> ' + objDoc + '</p>' +\n  '<p><strong>Alcance:</strong> ' + alcanceStr + '</p>' +\n  (supuestosLi    ? '<h4 style=\"margin:10px 0 4px\">Supuestos</h4><ul>' + supuestosLi    + '</ul>' : '') +\n  (restriccionesLi? '<h4 style=\"margin:10px 0 4px\">Restricciones</h4><ul>' + restriccionesLi + '</ul>' : '');\n\n// Sección portada\nconst titulo  = doc.titulo   || 'Especificación Técnica de Requisitos';\nconst fecha   = doc.fecha    || new Date().toISOString().split('T')[0];\nconst version = doc.version  || '1.0';\nconst estado  = doc.estado   || 'Borrador';\nconst resumen = esc(stripHtml(doc.resumen_ejecutivo || ''));\n\nfunction listaHTML(arr) {\n  const items = (arr || []).filter(x => x && String(x).trim());\n  if (items.length === 0) return '<li style=\"color:#777\">Ninguno</li>';\n  return items.map(x => '<li>' + esc(x) + '</li>').join('');\n}\nlet solapHTML = '';\nif (tiene_docs) {\n  const mismo = informe.mismo_sistema === true || informe.mismo_sistema === 'true';\n  const nivel = esc(informe.nivel_relacion || (mismo ? 'medio' : 'ninguno'));\n  const headColor = mismo ? '#f59e0b' : '#dc2626';\n  const headBg = mismo ? '#fffbeb' : '#fef2f2';\n  const headTxt = mismo ? '#92400e' : '#991b1b';\n  const tituloBox = mismo\n    ? '⚠️ Análisis de Impacto con Documentación Previa'\n    : '🚫 Documento previo NO relacionado con esta necesidad';\n  let cuerpo = '';\n  if (mismo) {\n    cuerpo =\n      '<p><strong>Relación con el sistema previo:</strong> ' + esc(informe.justificacion_relacion || '') + ' (nivel: ' + nivel + ')</p>' +\n      '<p><strong>Resumen:</strong> ' + esc(informe.resumen_ejecutivo || '') + '</p>' +\n      '<p><strong>Impacto estimado:</strong> ' + esc(informe.impacto_estimado || 'N/A') + '</p>' +\n      '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px\">' +\n        '<div><strong>Solapamientos</strong><ul>' + listaHTML(informe.solapamientos_detectados) + '</ul></div>' +\n        '<div><strong>Colisiones</strong><ul>' + listaHTML(informe.colisiones) + '</ul></div>' +\n        '<div><strong>Redundancias</strong><ul>' + listaHTML(informe.redundancias) + '</ul></div>' +\n        '<div><strong>Elementos nuevos</strong><ul>' + listaHTML(informe.elementos_nuevos) + '</ul></div>' +\n      '</div>' +\n      '<p style=\"margin-top:8px\"><strong>Recomendaciones:</strong></p><ul>' + listaHTML(informe.recomendaciones) + '</ul>';\n  } else {\n    cuerpo =\n      '<p><strong>El documento previo encontrado en Drive no corresponde a este sistema.</strong></p>' +\n      '<p>' + esc(informe.justificacion_relacion || 'La nueva necesidad describe un sistema diferente, por lo que no se aplica análisis de solapamiento.') + '</p>' +\n      '<p>Se genera la especificación como un documento independiente.</p>';\n  }\n  const box = '<div class=\"solapamiento\" style=\"background:' + headBg + ';border-color:' + headColor + '\">' +\n    '<h3 style=\"color:' + headTxt + '\">' + tituloBox + '</h3>' + cuerpo + '</div>';\n  // Pagina propia: encabezado + caja de analisis, con salto de pagina despues\n  solapHTML = '<div class=\"pagina-analisis\">' +\n    '<div class=\"doc-header\"><span style=\"font-weight:600;color:#0f3460;\">' + esc(titulo) + '</span>' +\n    '<span style=\"color:#666;\">v' + esc(version) + ' · ' + esc(fecha) + '</span></div>' +\n    '<h2 style=\"color:#0f3460;font-size:14pt;margin:0 0 14px;\">Analisis Previo de Documentacion</h2>' +\n    box + '</div>';\n}\n\n// ── Nuevas secciones ─────────────────────────────────────────────────────────\n// Análisis de calidad de los requisitos\nconst calidadRows = (doc.analisis_calidad || []).map(a =>\n  '<tr><td><strong>' + esc(a.aspecto) + '</strong></td><td>' + esc(a.evaluacion) + '</td><td>' + esc(a.recomendacion) + '</td></tr>'\n).join('') || null;\n\n// Matriz de trazabilidad (RTM): requisitos funcionales ↔ casos de uso.\n// Se construye desde los requisitos funcionales para garantizar que TODOS aparezcan\n// y detectar los que no tienen ningún caso de uso (alerta de diseño).\nconst rtmMap = {};\n(doc.matriz_trazabilidad || []).forEach(m => {\n  const id = m.requisito_id || m.id;\n  if (id) rtmMap[id] = m.casos_uso || m.casos_de_uso || m.cu || [];\n});\nconst rtmRows = (doc.requisitos_funcionales || []).map(rf => {\n  const cus = (rtmMap[rf.id] || []).filter(x => x && String(x).trim());\n  const cubierto = cus.length > 0;\n  const cusCell = cubierto\n    ? cus.map(esc).join(', ')\n    : '<span style=\"color:#dc2626;font-style:italic\">Sin caso de uso asociado</span>';\n  const estado = cubierto\n    ? '<span style=\"color:#16a34a;font-weight:700\">✓ Cubierto</span>'\n    : '<span style=\"color:#dc2626;font-weight:700\">⚠ Alerta</span>';\n  const rowStyle = cubierto ? '' : ' style=\"background:#fef2f2\"';\n  return '<tr' + rowStyle + '><td><strong>' + esc(rf.id) + '</strong></td><td>' + esc(rf.nombre) + '</td><td>' + cusCell + '</td><td>' + estado + '</td></tr>';\n}).join('') || null;\n\n// Identificación de actores (el sistema nunca es actor)\nconst actoresRows = (doc.actores || []).map(a =>\n  '<tr><td><strong>' + esc(a.nombre) + '</strong></td><td>' + esc(a.tipo) + '</td><td>' + esc(a.descripcion) + '</td></tr>'\n).join('') || null;\n\n// Estudios de viabilidad (7 dimensiones, cada una como subsección desarrollada)\nconst fmtNum = n => (typeof n === 'number' ? n.toLocaleString('es-ES') : esc(n));\nconst viabHTML = (doc.estudios_viabilidad || []).length\n  ? (doc.estudios_viabilidad || []).map(v => {\n      let extra = '';\n      // Económica: tabla de proyección + indicadores\n      const p = v.proyeccion;\n      if (p && Array.isArray(p.anios) && p.anios.length) {\n        const head = '<th>Concepto</th>' + p.anios.map(a => '<th>' + esc(a) + '</th>').join('');\n        const rowIng = '<tr><td><strong>Ingresos</strong></td>' + (p.ingresos || []).map(n => '<td>' + fmtNum(n) + '</td>').join('') + '</tr>';\n        const rowCos = '<tr><td><strong>Costes</strong></td>' + (p.costes || []).map(n => '<td>' + fmtNum(n) + '</td>').join('') + '</tr>';\n        const rowRes = '<tr><td><strong>Resultado</strong></td>' + p.anios.map((a, i) => { const r = ((p.ingresos || [])[i] || 0) - ((p.costes || [])[i] || 0); return '<td>' + fmtNum(r) + '</td>'; }).join('') + '</tr>';\n        extra += '<table style=\"margin-top:8px\"><thead><tr>' + head + '</tr></thead><tbody>' + rowIng + rowCos + rowRes + '</tbody></table>';\n        const inds = [];\n        if (v.inversion_inicial) inds.push('<strong>Inversión inicial:</strong> ' + esc(v.inversion_inicial));\n        if (v.payback) inds.push('<strong>Payback:</strong> ' + esc(v.payback));\n        if (v.roi) inds.push('<strong>ROI:</strong> ' + esc(v.roi));\n        if (inds.length) extra += '<p style=\"margin-top:6px;font-size:8.5pt\">' + inds.join(' &nbsp;·&nbsp; ') + '</p>';\n      }\n      // Temporal: cronograma\n      if (Array.isArray(v.cronograma) && v.cronograma.length) {\n        extra += '<table style=\"margin-top:8px\"><thead><tr><th>Fase</th><th>Duración</th></tr></thead><tbody>' +\n          v.cronograma.map(c => '<tr><td>' + esc(c.fase) + '</td><td>' + esc(c.duracion) + '</td></tr>').join('') + '</tbody></table>';\n      }\n      // Operacional: flujo operativo\n      if (Array.isArray(v.flujo_operativo) && v.flujo_operativo.length) {\n        extra += '<ol style=\"margin-top:6px\">' + v.flujo_operativo.map(f => '<li>' + esc(f) + '</li>').join('') + '</ol>';\n      }\n      const puntos = (v.puntos_clave || []).length ? '<ul>' + (v.puntos_clave || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '';\n      const concl = v.conclusion ? '<p class=\"viab-concl\"><strong>Conclusión:</strong> ' + esc(v.conclusion) + '</p>' : '';\n      const cuerpo = esc(v.analisis || v.evaluacion || '');\n      return '<div class=\"viab-sub\"><h4>Viabilidad ' + esc(v.tipo) + '</h4><p>' + cuerpo + '</p>' + puntos + extra + concl + '</div>';\n    }).join('')\n  : '<p style=\"color:#999;font-style:italic;\">Sin estudios de viabilidad registrados.</p>';\n\n// Estudio de alternativas (con recomendaciones y aprobaciones)\nconst alt = doc.estudio_alternativas || {};\nconst altBlocks = (alt.alternativas || []).length\n  ? (alt.alternativas || []).map((a, i) =>\n      '<div class=\"cu-block\"><h4>Alternativa ' + (i + 1) + ': ' + esc(a.nombre) + '</h4><table>' +\n      '<tr><th width=\"150\">Descripción</th><td>' + esc(a.descripcion) + '</td></tr>' +\n      '<tr><th>Ventajas</th><td><ul>' + (a.ventajas || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></td></tr>' +\n      '<tr><th>Desventajas</th><td><ul>' + (a.desventajas || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></td></tr>' +\n      '</table></div>'\n    ).join('')\n  : '<p style=\"color:#999;font-style:italic;\">Sin alternativas registradas.</p>';\nconst alternativasHTML = altBlocks +\n  '<h4 style=\"margin:14px 0 4px;color:#0f3460;\">Recomendaciones</h4><ul>' + listaHTML(alt.recomendaciones) + '</ul>' +\n  '<h4 style=\"margin:12px 0 4px;color:#0f3460;\">Aprobaciones</h4><ul>' + listaHTML(alt.aprobaciones) + '</ul>';\n\n// ── Ensamblado de secciones con numeración dinámica ──────────────────────────\nlet _num = 0;\nconst NUM = () => ++_num;\nlet seccionesHTML = '';\nseccionesHTML += sec('📄', 'Resumen Ejecutivo', '<p>' + resumen + '</p>');\nseccionesHTML += sec(NUM(), 'Introducción', introd);\nseccionesHTML += sec(NUM(), 'Requisitos Funcionales', tabla(['ID','Nombre','Descripción','Prioridad','Criterios de Aceptación'], rfRows));\nseccionesHTML += sec(NUM(), 'Requisitos No Funcionales', tabla(['ID','Categoría','Descripción','Métrica'], rnfRows));\nseccionesHTML += sec(NUM(), 'Requisitos de Información', tabla(['ID','Entidad','Atributos','Descripción'], riRows));\nseccionesHTML += sec(NUM(), 'Fuera de Alcance', tabla(['Descripción','Justificación'], noReqRows));\nseccionesHTML += sec(NUM(), 'Análisis de Calidad de los Requisitos', tabla(['Aspecto','Evaluación','Recomendación'], calidadRows));\nseccionesHTML += sec(NUM(), 'Matriz de Trazabilidad de Requisitos (RTM)',\n  '<p style=\"font-size:8.5pt;color:#555;margin-bottom:8px\">Relaciona cada requisito funcional con los casos de uso que lo implementan. Todo requisito debe estar cubierto por al menos un caso de uso; los que no lo están se marcan como <strong style=\"color:#dc2626\">alerta</strong> de posible funcionalidad no diseñada adecuadamente.</p>' +\n  tabla(['Requisito','Nombre','Casos de uso asociados','Estado'], rtmRows));\nseccionesHTML += sec(NUM(), 'Identificación de Actores', tabla(['Actor','Tipo','Descripción'], actoresRows));\nseccionesHTML += sec(NUM(), 'Casos de Uso', cuBlocks);\nseccionesHTML += sec(NUM(), 'Diagramas del Sistema',\n  imgDiagrama('casos_uso',        'Diagrama de Casos de Uso (UML)') +\n  imgDiagrama('flujo_principal',  'Diagrama de Actividad (UML)') +\n  imgDiagrama('entidad_relacion', 'Diagrama de Clases (UML)') +\n  imgDiagrama('arquitectura',     'Diagrama de Componentes (UML)')\n);\nseccionesHTML += sec(NUM(), 'Glosario', tabla(['Término','Definición'], glosarioRows));\nseccionesHTML += sec(NUM(), 'Estudios de Viabilidad', viabHTML);\nseccionesHTML += sec(NUM(), 'Estudio de Alternativas', alternativasHTML);\nseccionesHTML += sec(NUM(), 'Riesgos', tabla(['Descripción','Probabilidad','Impacto','Mitigación'], riesgoRows));\n\n// ── HTML final ────────────────────────────────────────────────────────────────\nconst html = `<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>${esc(titulo)}</title>\n  <style>\n    *{box-sizing:border-box;margin:0;padding:0}\n    body{font-family:Arial,sans-serif;font-size:10pt;line-height:1.6;color:#1a1a2e;background:#fff}\n    .portada{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;background:linear-gradient(135deg,#1a1a2e 0%,#0f3460 100%);color:#fff;text-align:center;padding:60px;page-break-after:always}\n    .portada h1{font-size:22pt;font-weight:700;margin-bottom:14px;line-height:1.3}\n    .portada .sub{font-size:11pt;opacity:.8;margin-bottom:18px}\n    .badge{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);padding:3px 10px;border-radius:12px;font-size:9pt;margin:3px}\n    .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px;text-align:left;width:100%;max-width:420px;border-top:1px solid rgba(255,255,255,.2);padding-top:18px}\n    .meta-label{font-size:8pt;opacity:.6;text-transform:uppercase;letter-spacing:.5px}\n    .meta-value{font-size:10pt;font-weight:500}\n    .pagina-analisis{max-width:760px;margin:0 auto;padding:36px;page-break-after:always;break-after:page}\n    .contenido{max-width:760px;margin:0 auto;padding:36px}\n    .doc-header{display:flex;justify-content:space-between;padding:10px 0;border-bottom:2px solid #0f3460;margin-bottom:22px;font-size:9pt}\n    .seccion{margin-bottom:24px;page-break-inside:avoid;break-inside:avoid}\n    .sec-header{page-break-after:avoid;break-after:avoid;background:linear-gradient(135deg,#0f3460,#1a1a2e);color:#fff;padding:9px 14px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:10px}\n    .sec-num{background:rgba(255,255,255,.2);width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10pt;flex-shrink:0}\n    .sec-header h2{font-size:10.5pt;font-weight:600;margin:0}\n    .sec-body{border:1px solid #e5e7eb;border-top:none;border-radius:0 0 6px 6px;padding:14px;background:#fafafa}\n    table{width:100%;border-collapse:collapse;margin:8px 0;font-size:8.5pt}\n    thead tr{background:#0f3460;color:#fff}\n    th{padding:7px 9px;text-align:left;font-weight:600}\n    tr{page-break-inside:avoid;break-inside:avoid;} td{padding:5px 9px;border-bottom:1px solid #e5e7eb;vertical-align:top}\n    tr:nth-child(even) td{background:#f3f4f6}\n    .cu-block{margin-bottom:14px;page-break-inside:avoid;break-inside:avoid;border:1px solid #e5e7eb;border-radius:4px;overflow:hidden}\n    .cu-block h4{color:#fff;background:#374151;padding:7px 10px;font-size:9.5pt;margin:0}\n    .cu-block table{margin:0;font-size:8.5pt}\n    .cu-block th{background:#f3f4f6;color:#374151;width:150px}\n    .viab-sub{margin-bottom:16px;padding-bottom:12px;border-bottom:1px dashed #e5e7eb;page-break-inside:avoid;break-inside:avoid}\n    .viab-sub:last-child{border-bottom:none}\n    .viab-sub h4{color:#0f3460;font-size:10pt;margin-bottom:5px;border-left:3px solid #0f3460;padding-left:8px}\n    .viab-concl{margin-top:6px;background:#eff6ff;border-left:3px solid #2563eb;padding:5px 9px;font-size:8.5pt}\n    .diagrama-box{page-break-inside:avoid;break-inside:avoid;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin:10px 0;text-align:center}\n    .diagrama-box img{max-width:100%;height:auto}\n    .diagrama-title{font-size:8.5pt;font-weight:600;color:#374151;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid #e5e7eb}\n    .solapamiento{background:#fffbeb;border:2px solid #f59e0b;border-radius:8px;padding:14px;margin:14px 0}\n    .solapamiento h3{color:#92400e;margin-bottom:6px;font-size:10pt}\n    .footer{text-align:center;color:#9ca3af;font-size:7.5pt;padding:14px 0;border-top:1px solid #e5e7eb;margin-top:26px}\n    p{margin-bottom:5px}\n    ul,ol{padding-left:16px;margin-bottom:5px}\n    li{margin-bottom:2px}\n    h4{margin-bottom:4px}\n  </style>\n</head>\n<body>\n<div class=\"portada\">\n  <div style=\"font-size:44px;margin-bottom:14px;\">📋</div>\n  <h1>${esc(titulo)}</h1>\n  <p class=\"sub\">${esc(doc.subtitulo||'Software Requirements Specification (SRS)')}</p>\n  <div>\n    <span class=\"badge\">v${esc(version)}</span>\n    <span class=\"badge\">${esc(fecha)}</span>\n    <span class=\"badge\">${esc(estado)}</span>\n  </div>\n  <div class=\"meta-grid\">\n    <div><div class=\"meta-label\">Proyecto</div><div class=\"meta-value\">${esc(metadata.nombre_proyecto||'N/A')}</div></div>\n    <div><div class=\"meta-label\">Solicitante</div><div class=\"meta-value\">${esc(metadata.solicitante||'N/A')}</div></div>\n    <div><div class=\"meta-label\">Generado con</div><div class=\"meta-value\">n8n + Groq AI</div></div>\n    <div><div class=\"meta-label\">Fecha</div><div class=\"meta-value\">${esc(fecha)}</div></div>\n  </div>\n</div>\n${solapHTML}\n<div class=\"contenido\">\n  <div class=\"doc-header\">\n    <span style=\"font-weight:600;color:#0f3460;\">${esc(titulo)}</span>\n    <span style=\"color:#666;\">v${esc(version)} · ${esc(fecha)}</span>\n  </div>\n  ${seccionesHTML}\n  <div class=\"footer\">\n    Generado con n8n Spec Generator · Groq Llama 3.3 70B · ${esc(fecha)}\n  </div>\n</div>\n</body>\n</html>`;\n\nreturn [{ json: { html, documento_final: doc, metadata, informe_solapamiento: informe, tiene_docs_previos: tiene_docs, imagenes_diagramas: imgs } }];"
+      }
+    },
+    {
+      "id": "node-024",
+      "name": "HTML - Construir Contenido PDF",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1,
+      "position": [
+        5280,
+        300
+      ],
+      "parameters": {
+        "html": "={{ $json.html }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-025",
+      "name": "Code - Convertir HTML a Binario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Convertir el HTML string a binario index.html para Gotenberg\nconst html = $input.first().json.html || '';\nconst buffer = Buffer.from(html, 'utf-8');\n\nreturn [{\n  json: $input.first().json,\n  binary: {\n    html_file: await this.helpers.prepareBinaryData(buffer, 'index.html', 'text/html')\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-026",
+      "name": "HTTP - Gotenberg Generar PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "html_file"
+            },
+            {
+              "name": "paperWidth",
+              "value": "8.27"
+            },
+            {
+              "name": "paperHeight",
+              "value": "11.69"
+            },
+            {
+              "name": "marginTop",
+              "value": "0.6"
+            },
+            {
+              "name": "marginBottom",
+              "value": "0.6"
+            },
+            {
+              "name": "marginLeft",
+              "value": "0.6"
+            },
+            {
+              "name": "marginRight",
+              "value": "0.6"
+            },
+            {
+              "name": "printBackground",
+              "value": "true"
+            },
+            {
+              "name": "waitDelay",
+              "value": "1s"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "pdf_data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "node-027",
+      "name": "Code - Preparar Subida a Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst ctx = $('Code - Agregar Imagenes al Contexto').first().json;\nconst metadata = ctx.metadata || {};\nconst docFinal = ctx.documento_final || {};\n\nconst nombreArchivo = 'Especificacion_' +\n  (metadata.nombre_proyecto || 'Tecnica').replace(/[^a-zA-Z0-9_\\-]/g, '_') +\n  '_v' + (docFinal.version || '1_1').replace('.', '_') +\n  '_' + new Date().toISOString().split('T')[0] + '.pdf';\n\nreturn [{\n  json: {\n    nombre_archivo: nombreArchivo,\n    metadata: metadata,\n    documento_final: docFinal,\n    informe_solapamiento: ctx.informe_solapamiento || {},\n    pdf_data: item.binary?.pdf_output ? 'pdf_output' : (Object.keys(item.binary || {})[0] || 'data'),\n    binary: item.binary\n  },\n  binary: item.binary\n}];"
+      }
+    },
+    {
+      "id": "node-030",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        6780,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "node-009b",
+      "name": "Extract - Leer Texto PDF Previo",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        880,
+        420
+      ],
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-012c",
+      "name": "IF - ¿Mismo Sistema?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-mismo-sistema",
+              "leftValue": "={{ $json.es_mismo_sistema }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-031",
+      "name": "Respond - Sistemas Distintos",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2860,
+        60
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: \"aborted\",\n  mensaje: \"El PDF que subiste describe un sistema distinto al de los cambios solicitados. No se ha generado ni enviado ninguna especificacion.\",\n  documento_previo: $json.nombre_doc_previo || \"\",\n  proyecto_solicitado: $json.metadata?.nombre_proyecto || \"N/A\",\n  justificacion: $json.informe_solapamiento?.justificacion_relacion || \"\",\n  nivel_relacion: $json.informe_solapamiento?.nivel_relacion || \"ninguno\"\n}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "node-003m",
+      "name": "Set - Datos Modificar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst texto = String(body.texto || '').trim();\nreturn [{\n  json: {\n    texto_entrada: 'SOLICITUD DE MODIFICACIÓN / AMPLIACIÓN\\n\\n' + texto,\n    metadata: {\n      nombre_proyecto: body.nombre_proyecto || 'Especificacion Tecnica',\n      solicitante: 'Interfaz Web',\n      fecha: new Date().toISOString().split('T')[0]\n    }\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-004b",
+      "name": "Code - Decodificar PDF Subido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const b64 = $('Webhook - Entrada').first().json.body.pdf_base64 || '';\nif (!b64) { throw new Error('No se recibio el PDF a modificar'); }\nconst buffer = Buffer.from(b64, 'base64');\nconst src = $input.first().json;\nreturn [{\n  json: { texto_entrada: src.texto_entrada || '', metadata: src.metadata || {} },\n  binary: { data: await this.helpers.prepareBinaryData(buffer, 'previo.pdf', 'application/pdf') }\n}];"
+      }
+    },
+    {
+      "id": "node-027b",
+      "name": "Code - PDF a Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6160,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binKey = item.binary?.pdf_data ? 'pdf_data' : (item.binary ? Object.keys(item.binary)[0] : null);\nif (!binKey) { throw new Error('No hay PDF binario en la entrada'); }\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binKey);\n\nconst ctx = $('Code - Preparar Subida a Drive').first().json;\nconst ctxImg = $('Code - Agregar Imagenes al Contexto').first().json;\nconst tienePrevio = ctxImg.tiene_docs_previos === true;\n\nreturn [{\n  json: {\n    status: 'success',\n    pdf_base64: buffer.toString('base64'),\n    filename: ctx.nombre_archivo || 'especificacion.pdf',\n    proyecto: (ctx.metadata && ctx.metadata.nombre_proyecto) || 'Especificacion',\n    analisis_resumen: tienePrevio ? ((ctx.informe_solapamiento && ctx.informe_solapamiento.resumen_ejecutivo) || '') : ''\n  }\n}];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Entrada": {
+      "main": [
+        [
+          {
+            "node": "Switch - Tipo de Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Tipo de Entrada": {
+      "main": [
+        [
+          {
+            "node": "Set - Datos Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set - Datos Modificar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Contexto Solapamiento": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Body Groq Solapamiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Body Groq Solapamiento": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Groq Analisis Solapamiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Groq Analisis Solapamiento": {
+      "main": [
+        [
+          {
+            "node": "Code - Procesar Informe Solapamiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Procesar Informe Solapamiento": {
+      "main": [
+        [
+          {
+            "node": "IF - ¿Mismo Sistema?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Sin Documentacion Previa": {
+      "main": [
+        [
+          {
+            "node": "Merge - Unir Ramas A y B",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Unir Ramas A y B": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Body Groq Borrador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Body Groq Borrador": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Groq Generar Borrador Spec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Groq Generar Borrador Spec": {
+      "main": [
+        [
+          {
+            "node": "Code - Procesar Borrador Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Procesar Borrador Groq": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Body Groq Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Body Groq Revision": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Groq Revisar Spec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Groq Revisar Spec": {
+      "main": [
+        [
+          {
+            "node": "Code - Procesar Revision Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Procesar Revision Groq": {
+      "main": [
+        [
+          {
+            "node": "Code - Construir Documento Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Construir Documento Final": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Diagramas para Kroki",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Diagramas para Kroki": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Kroki Renderizar Diagrama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Kroki Renderizar Diagrama": {
+      "main": [
+        [
+          {
+            "node": "Code - Procesar Imagenes Diagramas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Procesar Imagenes Diagramas": {
+      "main": [
+        [
+          {
+            "node": "Code - Agregar Imagenes al Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Agregar Imagenes al Contexto": {
+      "main": [
+        [
+          {
+            "node": "HTML - Construir Contenido PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML - Construir Contenido PDF": {
+      "main": [
+        [
+          {
+            "node": "Code - Convertir HTML a Binario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Convertir HTML a Binario": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Gotenberg Generar PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Gotenberg Generar PDF": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Subida a Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Preparar Subida a Drive": {
+      "main": [
+        [
+          {
+            "node": "Code - PDF a Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract - Leer Texto PDF Previo": {
+      "main": [
+        [
+          {
+            "node": "Code - Preparar Contexto Solapamiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - ¿Mismo Sistema?": {
+      "main": [
+        [
+          {
+            "node": "Merge - Unir Ramas A y B",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Sistemas Distintos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Datos Entrada": {
+      "main": [
+        [
+          {
+            "node": "Set - Sin Documentacion Previa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Datos Modificar": {
+      "main": [
+        [
+          {
+            "node": "Code - Decodificar PDF Subido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Decodificar PDF Subido": {
+      "main": [
+        [
+          {
+            "node": "Extract - Leer Texto PDF Previo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - PDF a Base64": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "spec-generator"
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generador de Especificaciones Técnicas</title>
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="logo">📋</span>
+      <div>
+        <h1>Generador de Especificaciones Técnicas</h1>
+        <p>Documentación SRS asistida por IA · n8n + Groq</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- PASO 1: elegir modo -->
+    <section id="paso-modo" class="paso activo">
+      <h2 class="paso-titulo"><span class="paso-num">1</span> ¿Qué quieres hacer?</h2>
+      <div class="opciones">
+        <button class="opcion-card" data-modo="cero">
+          <span class="opcion-icon">✨</span>
+          <span class="opcion-nombre">Generar desde cero</span>
+          <span class="opcion-desc">Crea una especificación técnica nueva a partir de tu descripción.</span>
+        </button>
+        <button class="opcion-card" data-modo="modificar">
+          <span class="opcion-icon">🔄</span>
+          <span class="opcion-nombre">Modificar existente</span>
+          <span class="opcion-desc">Sube una especificación en PDF y amplíala con nuevos requisitos.</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- PASO 2: entradas -->
+    <section id="paso-entrada" class="paso oculto">
+      <h2 class="paso-titulo"><span class="paso-num">2</span> <span id="paso2-label">Describe lo que necesitas</span></h2>
+
+      <!-- PDF previo (solo modo modificar) -->
+      <div id="bloque-pdf" class="campo oculto">
+        <label class="campo-label">Especificación existente (PDF) <span class="req">*</span></label>
+        <div class="dropzone" id="dropzone-pdf">
+          <input type="file" id="input-pdf" accept="application/pdf" hidden>
+          <span class="dz-icon">📄</span>
+          <span class="dz-text">Arrastra el PDF aquí o <strong>haz clic para seleccionar</strong></span>
+          <span class="dz-file" id="nombre-pdf"></span>
+        </div>
+      </div>
+
+      <!-- Texto: manual O .txt (mutuamente excluyentes) -->
+      <div class="campo">
+        <label class="campo-label" id="label-texto">Describe el sistema o los cambios que quieres <span class="req">*</span></label>
+
+        <!-- Opción A: escribir manualmente -->
+        <textarea id="texto-manual" rows="9" placeholder="Ejemplo: Sistema de gestión de inventario para un almacén. Debe controlar stock en tiempo real, generar alertas de stock mínimo, gestionar proveedores y emitir reportes mensuales. Usuarios: personal de almacén y administradores..."></textarea>
+
+        <div class="separador-o"><span>o</span></div>
+
+        <!-- Opción B: cargar un .txt -->
+        <div class="dropzone dropzone-sm" id="dropzone-txt">
+          <input type="file" id="input-txt" accept=".txt,text/plain" hidden>
+          <span class="dz-icon">📎</span>
+          <span class="dz-text">Cargar un archivo <strong>.txt</strong> en su lugar</span>
+        </div>
+        <div id="chip-txt" class="chip oculto">
+          <span class="chip-icon">📄</span>
+          <span id="chip-txt-nombre"></span>
+          <button type="button" id="quitar-txt" class="chip-x" title="Quitar archivo">✕</button>
+        </div>
+      </div>
+
+      <div class="acciones">
+        <button class="btn btn-secundario" id="btn-volver">← Volver</button>
+        <button class="btn btn-primario" id="btn-generar">Generar especificación</button>
+      </div>
+    </section>
+
+    <!-- PASO 3: procesando -->
+    <section id="paso-cargando" class="paso oculto">
+      <div class="cargando">
+        <div class="spinner"></div>
+        <h3 id="cargando-titulo">Generando la especificación…</h3>
+        <p id="cargando-sub">Esto puede tardar entre 30 y 90 segundos. Analizando, redactando y renderizando diagramas UML.</p>
+      </div>
+    </section>
+
+    <!-- PASO 3b: aborto (sistemas distintos) -->
+    <section id="paso-aborto" class="paso oculto">
+      <div class="aviso aviso-error">
+        <span class="aviso-icon">🚫</span>
+        <h3>No se generó la especificación</h3>
+        <p id="aborto-mensaje"></p>
+        <div id="aborto-detalle" class="aborto-detalle"></div>
+        <button class="btn btn-primario" id="btn-reiniciar-aborto">Empezar de nuevo</button>
+      </div>
+    </section>
+
+    <!-- PASO 4: resultado -->
+    <section id="paso-resultado" class="paso oculto">
+      <h2 class="paso-titulo"><span class="paso-num">✓</span> Especificación generada</h2>
+      <div id="banner-analisis" class="banner-analisis oculto"></div>
+      <div class="resultado-acciones">
+        <button class="btn btn-primario" id="btn-descargar">⬇ Descargar PDF</button>
+        <button class="btn btn-texto" id="btn-nueva">Generar otra</button>
+      </div>
+      <div class="pdf-visor">
+        <iframe id="pdf-frame" title="Previsualización del PDF"></iframe>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast oculto"></div>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>

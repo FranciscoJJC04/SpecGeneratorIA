@@ -1,0 +1,39 @@
+AMPLIACIÓN DEL SISTEMA VETCARE — SEGUNDA FASE
+
+Tras varios meses usando el sistema VetCare, la clínica "Patitas Felices" está muy contenta y
+quiere ampliarlo con nuevas funcionalidades para la segunda fase del proyecto. Se mantiene todo
+lo anterior (gestión de pacientes, citas, historiales, recordatorios y facturación) y se añade
+lo siguiente:
+
+PORTAL PARA LOS DUEÑOS DE MASCOTAS:
+Quieren un portal web donde los propios dueños puedan iniciar sesión con su cuenta y:
+- Consultar el historial clínico y el calendario de vacunas de sus mascotas.
+- Solicitar cita online eligiendo veterinario y franja horaria disponible.
+- Descargar sus facturas en PDF.
+
+TIENDA ONLINE DE PRODUCTOS:
+Ahora sí quieren incorporar la venta de productos (pienso, antiparasitarios, accesorios).
+Necesitan un catálogo de productos con stock, un carrito de compra y la gestión de pedidos.
+Los pagos se externalizarán a una pasarela de pago externa (no quieren gestionar tarjetas
+directamente). El control de stock debe avisar automáticamente cuando un producto baje de un
+mínimo, para reponerlo.
+
+TELEMEDICINA (CONSULTA ONLINE):
+Los veterinarios quieren poder atender consultas sencillas por videollamada. El dueño solicita
+una consulta online desde el portal, el sistema la agenda, y a la hora acordada se genera un
+enlace de videollamada. Estas consultas online también deben quedar registradas en el historial
+clínico del animal.
+
+NUEVOS REQUISITOS NO FUNCIONALES:
+- El portal de dueños y la tienda deben aguantar picos de hasta 200 usuarios concurrentes.
+- La pasarela de pago debe cumplir la normativa PCI-DSS.
+- El sistema de videollamada debe funcionar sin instalar software adicional (desde el navegador).
+
+CONSIDERACIONES:
+Se estima un presupuesto adicional de 15.000 € para esta segunda fase y un plazo de otros 2-3 meses.
+La clínica espera que el portal y la tienda aumenten los ingresos y la fidelización de clientes.
+
+INSTRUCCIONES DE USO DE ESTE EJEMPLO:
+1) Primero genera una especificación con "ejemplo-generar-desde-cero.txt" y descarga el PDF.
+2) Luego entra en "Modificar existente", sube ese PDF descargado y pega/carga este texto.
+   El sistema detectará que es el mismo proyecto y generará la versión ampliada (v1.1).

@@ -1,0 +1,20 @@
+═══════════════════════════════════════════════════════════
+ GENERADOR DE ESPECIFICACIONES TÉCNICAS CON IA
+═══════════════════════════════════════════════════════════
+MANUAL COMPLETO: abre MANUAL.pdf (o MANUAL.md)
+
+
+INSTALACIÓN RÁPIDA (5 pasos):
+
+ 1. Instala y abre Docker Desktop
+ 2. Copia ".env.example" como ".env" y pon tu clave de Groq
+    (gratis en https://console.groq.com/keys)
+ 3. Abre una terminal en esta carpeta:   docker compose up -d
+ 4. Entra en http://localhost:5678, crea tu cuenta local,
+    importa "spec-generator-workflow.json" (menú ⋮ → Import
+    from File) y pon el interruptor en "Active"
+ 5. Abre http://localhost:8080 y genera tu primera
+    especificación (hay textos de prueba en /ejemplos)
+
+¿Puertos 5678 u 8080 ocupados? Cámbialos en el archivo .env
+═══════════════════════════════════════════════════════════
